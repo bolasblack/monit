@@ -62,7 +62,7 @@
  * @param D Data to send
  * @return true if the message sending succeeded otherwise false
  */
-static boolean_t data_send(Socket_T socket, Mmonit_T C, const char *D) {
+static boolean_t mmonit_data_send(Socket_T socket, Mmonit_T C, const char *D) {
         char *auth = Util_getBasicAuthHeader(C->url->user, C->url->password);
         int rv = Socket_print(socket,
                               "POST %s HTTP/1.1\r\n"
@@ -95,7 +95,7 @@ static boolean_t data_send(Socket_T socket, Mmonit_T C, const char *D) {
  * @param C An mmonit object
  * @return true if the response is valid otherwise false
  */
-static boolean_t data_check(Socket_T socket, Mmonit_T C) {
+static boolean_t mmonit_data_check(Socket_T socket, Mmonit_T C) {
         int  status;
         char buf[STRLEN];
         if (! Socket_readLine(socket, buf, sizeof(buf))) {
@@ -106,6 +106,63 @@ static boolean_t data_check(Socket_T socket, Mmonit_T C) {
         int n = sscanf(buf, "%*s %d", &status);
         if (n != 1 || (status >= 400)) {
                 LogError("M/Monit: message sending failed to %s -- %s\n", C->url->url, buf);
+                return false;
+        }
+        return true;
+}
+
+
+/* ----------------------------------------------------------------- Private */
+
+
+/**
+ * Send message to the server
+ * @param C An webhook object
+ * @param D Data to send
+ * @return TRUE if the message sending succeeded otherwise FALSE
+ */
+static boolean_t webhook_data_send(Socket_T socket, Webhook_T C, const char *D) {
+        char *auth = Util_getBasicAuthHeader(C->url->user, C->url->password);
+        int rv = Socket_print(socket,
+                              "POST %s?%s HTTP/1.1\r\n"
+                              "Host: %s\r\n"
+                              "Content-Type: text/x-www-form-urlencoded\r\n"
+                              "Content-Length: %d\r\n"
+                              "Pragma: no-cache\r\n"
+                              "Accept: */*\r\n"
+                              "User-Agent: %s/%s\r\n"
+                              "\r\n"
+                              "%s",
+                              C->url->path, C->url->query ? C->url->query : "",
+                              C->url->hostname,
+                              strlen(D),
+                              prog, VERSION,
+                              D);
+        FREE(auth);
+        if (rv <0) {
+                LogError("WebHook: error sending data to %s -- %s\n", C->url->url, STRERROR);
+                return false;
+        }
+        return true;
+}
+
+
+/**
+ * Check that the server returns a valid HTTP response
+ * @param C An webhook object
+ * @return TRUE if the response is valid otherwise FALSE
+ */
+static boolean_t webhook_data_check(Socket_T socket, Webhook_T C) {
+        int  status;
+        char buf[STRLEN];
+        if (! Socket_readLine(socket, buf, sizeof(buf))) {
+                LogError("WebHook: error receiving data from %s -- %s\n", C->url->url, STRERROR);
+                return false;
+        }
+        Str_chomp(buf);
+        int n = sscanf(buf, "%*s %d", &status);
+        if (n != 1 || (status >= 400)) {
+                LogError("WebHook: message sending failed to %s -- %s\n", C->url->url, buf);
                 return false;
         }
         return true;
@@ -134,12 +191,12 @@ Handler_Type handle_mmonit(Event_T E) {
                 }
                 char buf[STRLEN];
                 status_xml(sb, E, E ? Level_Summary : Level_Full, 2, Socket_getLocalHost(socket, buf, sizeof(buf)));
-                if (! data_send(socket, C, StringBuffer_toString(sb))) {
+                if (! mmonit_data_send(socket, C, StringBuffer_toString(sb))) {
                         LogError("M/Monit: cannot send %s message to %s\n", E ? "event" : "status", C->url->url);
                         goto error;
                 }
                 StringBuffer_clear(sb);
-                if (! data_check(socket, C)) {
+                if (! mmonit_data_check(socket, C)) {
                         LogError("M/Monit: %s message to %s failed\n", E ? "event" : "status", C->url->url);
                         goto error;
                 }
@@ -153,3 +210,40 @@ Handler_Type handle_mmonit(Event_T E) {
         return rv;
 }
 
+/**
+ * Post event or status data message to webhook
+ * @param E An event object or NULL for status data
+ * @return If failed, return HANDLER_WEBHOOK flag or HANDLER_SUCCEEDED flag if succeeded
+ */
+Handler_Type handle_webhook(Event_T E) {
+        Handler_Type rv = Handler_Webhook;
+        /* The event is sent to mmonit just once - only in the case that the state changed */
+        if (! Run.webhooks || (E && ! E->state_changed))
+                return Handler_Succeeded;
+        StringBuffer_T sb = StringBuffer_create(256);
+        for (Webhook_T C = Run.webhooks; C; C = C->next) {
+                Socket_T socket = Socket_create(C->url->hostname, C->url->port, Socket_Tcp, Socket_Ip, C->ssl, C->timeout);
+                if (! socket) {
+                        LogError("WebHook: cannot open a connection to %s\n", C->url->url);
+                        goto error;
+                }
+                char buf[STRLEN];
+                status_xml(sb, E, E ? Level_Summary : Level_Full, 2, Socket_getLocalHost(socket, buf, sizeof(buf)));
+                if (! webhook_data_send(socket, C, StringBuffer_toString(sb))) {
+                        LogError("Webhook: cannot send %s message to %s\n", E ? "event" : "status", C->url->url);
+                        goto error;
+                }
+                StringBuffer_clear(sb);
+                if (! webhook_data_check(socket, C)) {
+                        LogError("Webhook: %s message to %s failed\n", E ? "event" : "status", C->url->url);
+                        goto error;
+                }
+                rv = Handler_Succeeded; // Return success if at least one M/Monit succeeded
+                DEBUG("Webhook: %s message sent to %s\n", E ? "event" : "status", C->url->url);
+        error:
+                if (socket)
+                        Socket_free(&socket);
+        }
+        StringBuffer_free(&sb);
+        return rv;
+}

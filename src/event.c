@@ -443,7 +443,7 @@ const char *Event_get_action_description(Event_T E) {
  */
 void Event_queue_process() {
         /* return in the case that the eventqueue is not enabled or empty */
-        if (! Run.eventlist_dir || (! (Run.flags & Run_HandlerInit) && ! Run.handler_queue[Handler_Alert] && ! Run.handler_queue[Handler_Mmonit]))
+        if (! Run.eventlist_dir || (! (Run.flags & Run_HandlerInit) && ! Run.handler_queue[Handler_Alert] && ! Run.handler_queue[Handler_Mmonit] && ! Run.handler_queue[Handler_Webhook]))
                 return;
 
         DIR *dir = opendir(Run.eventlist_dir);
@@ -571,6 +571,22 @@ void Event_queue_process() {
                                 }
                         }
 
+                        /* webhook */
+                        if (e->flag & Handler_Webhook) {
+                                if (Run.flags & Run_HandlerInit)
+                                        Run.handler_queue[Handler_Webhook]++;
+                                if ((Run.handler_flag & Handler_Webhook) != Handler_Webhook) {
+                                        if ( handle_webhook(e) != Handler_Webhook ) {
+                                                e->flag &= ~Handler_Webhook;
+                                                Run.handler_queue[Handler_Webhook]--;
+                                                handlers_passed++;
+                                        } else {
+                                                LogError("WebHook handler failed, retry scheduled for next cycle\n");
+                                                Run.handler_flag |= Handler_Webhook;
+                                        }
+                                }
+                        }
+
                         /* If no error persists, remove it from the queue */
                         if (e->flag == Handler_Succeeded) {
                                 DEBUG("Removing queued event %s\n", file_name);
@@ -674,6 +690,7 @@ static void handle_action(Event_T E, Action_T A) {
 
         /* Alert and mmonit event notification are common actions */
         E->flag |= handle_mmonit(E);
+        E->flag |= handle_webhook(E);
         E->flag |= handle_alert(E);
 
         /* In the case that some subhandler failed, enqueue the event for
@@ -776,6 +793,8 @@ error:
                         Run.handler_queue[Handler_Alert]++;
                 if (! (Run.flags & Run_HandlerInit) && E->flag & Handler_Mmonit)
                         Run.handler_queue[Handler_Mmonit]++;
+                if (! (Run.flags & Run_HandlerInit) && E->flag & Handler_Webhook)
+                        Run.handler_queue[Handler_Webhook]++;
         }
 
         return;

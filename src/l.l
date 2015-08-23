@@ -352,6 +352,7 @@ passed            { return PASSED; }
 succeeded         { return SUCCEEDED; }
 else              { return ELSE; }
 mmonit            { return MMONIT; }
+webhook           { return WEBHOOK; }
 url               { return URL; }
 content           { return CONTENT; }
 pid               { return PID; }

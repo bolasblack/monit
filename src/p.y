@@ -186,6 +186,7 @@ static struct mymail mailset;
 static struct myport portset;
 static struct mymailserver mailserverset;
 static struct mymmonit mmonitset;
+static struct mywebhook webhookset;
 static struct myfilesystem filesystemset;
 static struct myresource resourceset;
 static struct mychecksum checksumset;
@@ -230,6 +231,7 @@ static void  addgeneric(Port_T, char*, char*);
 static void  addcommand(int, unsigned);
 static void  addargument(char *);
 static void  addmmonit(Mmonit_T);
+static void  addwebhook(Webhook_T);
 static void  addmailserver(MailServer_T);
 static boolean_t addcredentials(char *, char *, Digest_Type, boolean_t);
 #ifdef HAVE_LIBPAM
@@ -255,6 +257,7 @@ static void  setpidfile(char *);
 static void  reset_mailset();
 static void  reset_mailserverset();
 static void  reset_mmonitset();
+static void  reset_webhookset();
 static void  reset_portset();
 static void  reset_resourceset();
 static void  reset_timestampset();
@@ -318,7 +321,7 @@ static int verifyMaxForward(int);
 %token RESOURCE MEMORY TOTALMEMORY LOADAVG1 LOADAVG5 LOADAVG15 SWAP
 %token MODE ACTIVE PASSIVE MANUAL CPU TOTALCPU CPUUSER CPUSYSTEM CPUWAIT
 %token GROUP REQUEST DEPENDS BASEDIR SLOT EVENTQUEUE SECRET HOSTHEADER
-%token UID EUID GID MMONIT INSTANCE USERNAME PASSWORD
+%token UID EUID GID MMONIT INSTANCE USERNAME PASSWORD WEBHOOK
 %token TIMESTAMP CHANGED SECOND MINUTE HOUR DAY MONTH
 %token SSLAUTO SSLV2 SSLV3 TLSV1 TLSV11 TLSV12 CERTMD5
 %token BYTE KILOBYTE MEGABYTE GIGABYTE
@@ -348,6 +351,7 @@ statement       : setalert
                 | setlog
                 | seteventqueue
                 | setmmonits
+                | setwebhooks
                 | setmailservers
                 | setmailformat
                 | sethttpd
@@ -632,6 +636,32 @@ setpid          : SET PIDFILE PATH {
                      setpidfile($3);
                    }
                  }
+                ;
+
+setwebhooks     : SET WEBHOOK webhooklist
+                ;
+
+webhooklist     : webhook credentials
+                | webhooklist webhook credentials
+                ;
+
+webhook         : URLOBJECT nettimeout webhookoptlist {
+                        webhookset.url = $<url>1;
+                        webhookset.timeout = $<number>2;
+                        addwebhook(&webhookset);
+                }
+                ;
+
+webhookoptlist  : /* EMPTY */
+                | webhookoptlist webhookopt
+                ;
+
+webhookopt      : sslversion {
+                        webhookset.ssl.version = $<number>1;
+                }
+                | certmd5 {
+                        webhookset.ssl.certmd5 = $<string>1;
+                  }
                 ;
 
 setmmonits      : SET MMONIT mmonitlist
@@ -2449,6 +2479,7 @@ static void preparse() {
         Run.system                  = NULL;
         Run.expectbuffer            = STRLEN;
         Run.mmonits                 = NULL;
+        Run.webhooks                = NULL;
         Run.maillist                = NULL;
         Run.mailservers             = NULL;
         Run.MailFormat.from         = NULL;
@@ -2456,7 +2487,7 @@ static void preparse() {
         Run.MailFormat.subject      = NULL;
         Run.MailFormat.message      = NULL;
         depend_list                 = NULL;
-        Run.flags |= Run_HandlerInit | Run_MmonitCredentials;
+        Run.flags |= Run_HandlerInit | Run_MmonitCredentials | Run_WebhookCredentials;
         for (i = 0; i <= Handler_Max; i++)
                 Run.handler_queue[i] = 0;
         /*
@@ -2469,6 +2500,7 @@ static void preparse() {
         reset_mailset();
         reset_mailserverset();
         reset_mmonitset();
+        reset_webhookset();
         reset_portset();
         reset_permset();
         reset_icmpset();
@@ -2538,6 +2570,27 @@ static void postparse() {
                         LogWarning("M/Monit enabled but Monit httpd is using unix socket -- please change 'set httpd' statement to use TCP port in order to be able to manage services on Monit\n");
                 } else {
                         LogWarning("M/Monit enabled but no httpd allowed -- please add 'set httpd' statement\n");
+                }
+        }
+
+
+        if (Run.webhooks) {
+                if (Run.httpd.flags & Httpd_Net) {
+                        if (Run.flags & Run_WebhookCredentials) {
+                                Auth_T c;
+                                for (c = Run.httpd.credentials; c; c = c->next) {
+                                        if (c->digesttype == Digest_Cleartext && ! c->is_readonly) {
+                                                Run.webhookcredentials = c;
+                                                break;
+                                        }
+                                }
+                                if (! Run.webhookcredentials)
+                                        LogWarning("WebHook registration with credentials enabled, but no suitable credentials found in monit configuration file -- please add 'allow user:password' option to 'set httpd' statement\n");
+                        }
+                } else if (Run.httpd.flags & Httpd_Unix) {
+                        LogWarning("WebHook enabled but Monit httpd is using unix socket -- please change 'set httpd' statement to use TCP port in order to be able to manage services on Monit\n");
+                } else {
+                        LogWarning("WebHook enabled but no httpd allowed -- please add 'set httpd' statement\n");
                 }
         }
 
@@ -3563,6 +3616,43 @@ static void addmmonit(Mmonit_T mmonit) {
 
 
 /*
+ * Add a new data recipient server to the webhook server list
+ */
+static void addwebhook(Webhook_T webhook) {
+        ASSERT(webhook->url);
+
+        Webhook_T c;
+        NEW(c);
+        c->url = webhook->url;
+        c->ssl.version = webhook->ssl.version;
+        if (IS(c->url->protocol, "https")) {
+#ifdef HAVE_OPENSSL
+                c->ssl.use_ssl = true;
+                c->ssl.version = (webhook->ssl.version == SSL_Disabled) ? SSL_Auto : webhook->ssl.version;
+                if (webhook->ssl.certmd5) {
+                        c->ssl.certmd5 = webhook->ssl.certmd5;
+                        cleanup_hash_string(c->ssl.certmd5);
+                }
+#else
+                yyerror("SSL check cannot be activated -- SSL disabled");
+#endif
+        }
+        c->timeout = webhook->timeout;
+        c->next = NULL;
+
+        if (Run.webhooks) {
+                Webhook_T C;
+                for (C = Run.webhooks; C->next; C = C->next)
+                        /* Empty */ ;
+                C->next = c;
+        } else {
+                Run.webhooks = c;
+        }
+        reset_webhookset();
+}
+
+
+/*
  * Add a new smtp server to the mail server list
  */
 static void addmailserver(MailServer_T mailserver) {
@@ -3926,9 +4016,18 @@ static void reset_mailserverset() {
  */
 static void reset_mmonitset() {
         memset(&mmonitset, 0, sizeof(struct mymmonit));
-        mailserverset.port = 8080;
-        mailserverset.ssl.use_ssl = false;
-        mailserverset.ssl.version = SSL_Disabled;
+        mmonitset.ssl.use_ssl = false;
+        mmonitset.ssl.version = SSL_Disabled;
+}
+
+
+/*
+ * Reset the webhook set to default values
+ */
+static void reset_webhookset() {
+        memset(&webhookset, 0, sizeof(struct mywebhook));
+        webhookset.ssl.use_ssl = false;
+        webhookset.ssl.version = SSL_Disabled;
 }
 
 
