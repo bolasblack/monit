@@ -330,7 +330,7 @@ static void do_reinit() {
          globale process table which a sigchld handler can check */
         waitforchildren();
 
-        if (Run.mmonits && heartbeatRunning) {
+        if ((Run.mmonits || Run.webhooks) && heartbeatRunning) {
                 Sem_signal(heartbeatCond);
                 Thread_join(heartbeatThread);
                 heartbeatRunning = false;
@@ -387,7 +387,7 @@ static void do_reinit() {
         /* send the monit startup notification */
         Event_post(Run.system, Event_Instance, State_Changed, Run.system->action_MONIT_RELOAD, "Monit reloaded");
 
-        if (Run.mmonits) {
+        if (Run.mmonits || Run.webhooks) {
                 Thread_create(heartbeatThread, heartbeat, NULL);
                 heartbeatRunning = true;
         }
@@ -474,7 +474,7 @@ static void do_exit() {
                 if (can_http())
                         monit_http(Httpd_Stop);
 
-                if (Run.mmonits && heartbeatRunning) {
+                if ((Run.mmonits || Run.webhooks) && heartbeatRunning) {
                         Sem_signal(heartbeatCond);
                         Thread_join(heartbeatThread);
                         heartbeatRunning = false;
@@ -551,7 +551,7 @@ static void do_default() {
                 /* send the monit startup notification */
                 Event_post(Run.system, Event_Instance, State_Changed, Run.system->action_MONIT_START, "Monit %s started", VERSION);
 
-                if (Run.mmonits) {
+                if (Run.mmonits || Run.webhooks) {
                         Thread_create(heartbeatThread, heartbeat, NULL);
                         heartbeatRunning = true;
                 }
@@ -831,6 +831,7 @@ static void *heartbeat(void *args) {
         {
                 while (! (Run.flags & Run_Stopped) && ! (Run.flags & Run_DoReload)) {
                         handle_mmonit(NULL);
+                        handle_webhook(NULL);
                         struct timespec wait = {.tv_sec = Time_now() + Run.polltime, .tv_nsec = 0};
                         Sem_timeWait(heartbeatCond, heartbeatMutex, wait);
                 }

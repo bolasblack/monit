@@ -167,7 +167,8 @@ typedef enum {
         Run_MmonitCredentials    = 0x200,      /**< Should set M/Monit credentials */
         Run_Stopped              = 0x400,                          /**< Stop Monit */
         Run_DoReload             = 0x800,                        /**< Reload Monit */
-        Run_DoWakeup             = 0x1000                        /**< Wakeup Monit */
+        Run_DoWakeup             = 0x1000,                       /**< Wakeup Monit */
+        Run_WebhookCredentials   = 0x2000      /**< Should set Webhook credentials */
 } __attribute__((__packed__)) Run_Flags;
 
 
@@ -320,7 +321,8 @@ typedef enum {
         Handler_Succeeded = 0x0,
         Handler_Alert     = 0x1,
         Handler_Mmonit    = 0x2,
-        Handler_Max       = Handler_Mmonit
+        Handler_Webhook   = 0x3,
+        Handler_Max       = Handler_Webhook
 } __attribute__((__packed__)) Handler_Type;
 
 
@@ -453,6 +455,17 @@ typedef struct mymmonit {
         /** For internal use */
         struct mymmonit *next;                         /**< next receiver in chain */
 } *Mmonit_T;
+
+
+/** Defines an event notification and status receiver object */
+typedef struct mywebhook {
+        URL_T url;                                             /**< URL definition */
+        SslOptions_T ssl;                                      /**< SSL definition */
+        int timeout;              /**< The timeout to wait for connection or i/o */
+
+        /** For internal use */
+        struct mywebhook *next;                         /**< next receiver in chain */
+} *Webhook_T;
 
 
 /** Defines a mailinglist object */
@@ -1132,6 +1145,8 @@ struct myrun {
         MailServer_T mailservers;    /**< List of MTAs used for alert notification */
         Mmonit_T mmonits;        /**< Event notification and status receivers list */
         Auth_T mmonitcredentials;     /**< Pointer to selected credentials or NULL */
+        Webhook_T webhooks;      /**< Event notification and status receivers list */
+        Auth_T webhookcredentials;    /**< Pointer to selected credentials or NULL */
         Event_T eventlist;              /** A list holding partialy handled events */
         /** User selected standard mail format */
         struct myformat {
@@ -1228,6 +1243,7 @@ State_Type check_net(Service_T);
 int  check_URL(Service_T s);
 void status_xml(StringBuffer_T, Event_T, Level_Type, int, const char *);
 Handler_Type handle_mmonit(Event_T);
+Handler_Type handle_webhook(Event_T);
 boolean_t  do_wakeupcall();
 
 #endif

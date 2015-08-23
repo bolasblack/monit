@@ -73,6 +73,7 @@ static void _gcnonexist(Nonexist_T *);
 static void _gcgeneric(Generic_T *);
 static void _gcath(Auth_T *);
 static void _gc_mmonit(Mmonit_T *);
+static void _gc_webhook(Webhook_T *);
 static void _gc_url(URL_T *);
 static void _gc_request(Request_T *);
 
@@ -105,6 +106,8 @@ void gc() {
                 _gc_mail_server(&Run.mailservers);
         if (Run.mmonits)
                 _gc_mmonit(&Run.mmonits);
+        if (Run.webhooks)
+                _gc_webhook(&Run.webhooks);
         if (Run.eventlist)
                 gc_event(&Run.eventlist);
         FREE(Run.eventlist_dir);
@@ -627,3 +630,12 @@ static void _gc_mmonit(Mmonit_T *recv) {
         FREE(*recv);
 }
 
+static void _gc_webhook(Webhook_T *recv) {
+        ASSERT(recv);
+        if((*recv)->next)
+                _gc_webhook(&(*recv)->next);
+        _gc_url(&(*recv)->url);
+        FREE((*recv)->ssl.certmd5);
+        FREE((*recv)->ssl.clientpemfile);
+        FREE(*recv);
+}

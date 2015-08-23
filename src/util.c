@@ -834,6 +834,25 @@ void Util_printRunList() {
                 printf("\n");
         }
 
+        if (Run.webhooks) {
+                Webhook_T c;
+                printf(" %-18s = ", "Webhook(s)");
+                for (c = Run.webhooks; c; c = c->next) {
+                        printf("%s with timeout %d seconds%s%s%s%s%s%s",
+                               c->url->url,
+                               c->timeout / 1000,
+                               (c->ssl.use_ssl && c->ssl.version) ? " ssl version " : "",
+                               (c->ssl.use_ssl && c->ssl.version) ? sslnames[c->ssl.version] : "",
+                               c->ssl.certmd5?" server cert md5 sum ":"",
+                               c->ssl.certmd5?c->ssl.certmd5:"",
+                               c->url->user?" using credentials":"",
+                               c->next?",\n                    = ":"");
+                }
+                if (! (Run.flags & Run_WebhookCredentials))
+                        printf("\n                      register without credentials");
+                printf("\n");
+        }
+
         if (Run.mailservers) {
                 MailServer_T mta;
                 printf(" %-18s = ", "Mail server(s)");

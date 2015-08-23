@@ -190,6 +190,7 @@ static struct SslOptions_T sslset;
 static struct myport portset;
 static struct mymailserver mailserverset;
 static struct mymmonit mmonitset;
+static struct mywebhook webhookset;
 static struct myfilesystem filesystemset;
 static struct myresource resourceset;
 static struct mychecksum checksumset;
@@ -234,6 +235,7 @@ static void  addgeneric(Port_T, char*, char*);
 static void  addcommand(int, unsigned);
 static void  addargument(char *);
 static void  addmmonit(Mmonit_T);
+static void  addwebhook(Webhook_T);
 static void  addmailserver(MailServer_T);
 static boolean_t addcredentials(char *, char *, Digest_Type, boolean_t);
 #ifdef HAVE_LIBPAM
@@ -260,6 +262,7 @@ static void  reset_sslset();
 static void  reset_mailset();
 static void  reset_mailserverset();
 static void  reset_mmonitset();
+static void  reset_webhookset();
 static void  reset_portset();
 static void  reset_resourceset();
 static void  reset_timestampset();
@@ -323,7 +326,7 @@ static int verifyMaxForward(int);
 %token RESOURCE MEMORY TOTALMEMORY LOADAVG1 LOADAVG5 LOADAVG15 SWAP
 %token MODE ACTIVE PASSIVE MANUAL CPU TOTALCPU CPUUSER CPUSYSTEM CPUWAIT
 %token GROUP REQUEST DEPENDS BASEDIR SLOT EVENTQUEUE SECRET HOSTHEADER
-%token UID EUID GID MMONIT INSTANCE USERNAME PASSWORD
+%token UID EUID GID MMONIT INSTANCE USERNAME PASSWORD WEBHOOK
 %token TIMESTAMP CHANGED SECOND MINUTE HOUR DAY MONTH
 %token SSLAUTO SSLV2 SSLV3 TLSV1 TLSV11 TLSV12 CERTMD5 AUTO
 %token BYTE KILOBYTE MEGABYTE GIGABYTE
@@ -354,6 +357,7 @@ statement       : setalert
                 | setlog
                 | seteventqueue
                 | setmmonits
+                | setwebhooks
                 | setmailservers
                 | setmailformat
                 | sethttpd
@@ -640,6 +644,32 @@ setpid          : SET PIDFILE PATH {
                      setpidfile($3);
                    }
                  }
+                ;
+
+setwebhooks     : SET WEBHOOK webhooklist
+                ;
+
+webhooklist     : webhook credentials
+                | webhooklist webhook credentials
+                ;
+
+webhook         : URLOBJECT nettimeout webhookoptlist {
+                        webhookset.url = $<url>1;
+                        webhookset.timeout = $<number>2;
+                        addwebhook(&webhookset);
+                }
+                ;
+
+webhookoptlist  : /* EMPTY */
+                | webhookoptlist webhookopt
+                ;
+
+webhookopt      : sslversion {
+                        webhookset.ssl.version = $<number>1;
+                }
+                | certmd5 {
+                        webhookset.ssl.certmd5 = $<string>1;
+                  }
                 ;
 
 setmmonits      : SET MMONIT mmonitlist
@@ -2611,6 +2641,7 @@ static void preparse() {
         Run.system                  = NULL;
         Run.expectbuffer            = STRLEN;
         Run.mmonits                 = NULL;
+        Run.webhooks                = NULL;
         Run.maillist                = NULL;
         Run.mailservers             = NULL;
         Run.MailFormat.from         = NULL;
@@ -2618,7 +2649,7 @@ static void preparse() {
         Run.MailFormat.subject      = NULL;
         Run.MailFormat.message      = NULL;
         depend_list                 = NULL;
-        Run.flags |= Run_HandlerInit | Run_MmonitCredentials;
+        Run.flags |= Run_HandlerInit | Run_MmonitCredentials | Run_WebhookCredentials;
         for (i = 0; i <= Handler_Max; i++)
                 Run.handler_queue[i] = 0;
         /*
@@ -2632,6 +2663,7 @@ static void preparse() {
         reset_sslset();
         reset_mailserverset();
         reset_mmonitset();
+        reset_webhookset();
         reset_portset();
         reset_permset();
         reset_icmpset();
@@ -2701,6 +2733,27 @@ static void postparse() {
                         LogWarning("M/Monit enabled but Monit httpd is using unix socket -- please change 'set httpd' statement to use TCP port in order to be able to manage services on Monit\n");
                 } else {
                         LogWarning("M/Monit enabled but no httpd allowed -- please add 'set httpd' statement\n");
+                }
+        }
+
+
+        if (Run.webhooks) {
+                if (Run.httpd.flags & Httpd_Net) {
+                        if (Run.flags & Run_WebhookCredentials) {
+                                Auth_T c;
+                                for (c = Run.httpd.credentials; c; c = c->next) {
+                                        if (c->digesttype == Digest_Cleartext && ! c->is_readonly) {
+                                                Run.webhookcredentials = c;
+                                                break;
+                                        }
+                                }
+                                if (! Run.webhookcredentials)
+                                        LogWarning("WebHook registration with credentials enabled, but no suitable credentials found in monit configuration file -- please add 'allow user:password' option to 'set httpd' statement\n");
+                        }
+                } else if (Run.httpd.flags & Httpd_Unix) {
+                        LogWarning("WebHook enabled but Monit httpd is using unix socket -- please change 'set httpd' statement to use TCP port in order to be able to manage services on Monit\n");
+                } else {
+                        LogWarning("WebHook enabled but no httpd allowed -- please add 'set httpd' statement\n");
                 }
         }
 
@@ -3247,44 +3300,44 @@ static void addperm(Perm_T ps) {
 
 static void addlinkstatus(Service_T s, LinkStatus_T L) {
         ASSERT(L);
-        
+
         LinkStatus_T l;
         NEW(l);
         l->action = L->action;
-        
+
         l->next = s->linkstatuslist;
         s->linkstatuslist = l;
-        
+
         reset_linkstatusset();
 }
 
 
 static void addlinkspeed(Service_T s, LinkSpeed_T L) {
         ASSERT(L);
-        
+
         LinkSpeed_T l;
         NEW(l);
         l->action = L->action;
-        
+
         l->next = s->linkspeedlist;
         s->linkspeedlist = l;
-        
+
         reset_linkspeedset();
 }
 
 
 static void addlinksaturation(Service_T s, LinkSaturation_T L) {
         ASSERT(L);
-        
+
         LinkSaturation_T l;
         NEW(l);
         l->operator = L->operator;
         l->limit = L->limit;
         l->action = L->action;
-        
+
         l->next = s->linksaturationlist;
         s->linksaturationlist = l;
-        
+
         reset_linksaturationset();
 }
 
@@ -3419,13 +3472,13 @@ static void addmatchpath(Match_T ms, Action_Type actionnumber) {
                         }
                         savecommand = copycommand(command1);
                 }
-                
+
                 addmatch(ms, actionnumber, linenumber);
         }
-        
+
         if (actionnumber == Action_Exec && savecommand)
                 gccmd(&savecommand);
-        
+
         fclose(handle);
 }
 
@@ -3495,7 +3548,7 @@ static void addfilesystem(Filesystem_T ds) {
 
         dev->next               = current->filesystemlist;
         current->filesystemlist = dev;
-        
+
         reset_filesystemset();
 
 }
@@ -3609,7 +3662,7 @@ static void addcommand(int what, unsigned timeout) {
         }
 
         command->timeout = timeout;
-        
+
         command = NULL;
 
 }
@@ -3728,6 +3781,43 @@ static void addmmonit(Mmonit_T mmonit) {
         }
         reset_sslset();
         reset_mmonitset();
+}
+
+
+/*
+ * Add a new data recipient server to the webhook server list
+ */
+static void addwebhook(Webhook_T webhook) {
+        ASSERT(webhook->url);
+
+        Webhook_T c;
+        NEW(c);
+        c->url = webhook->url;
+        c->ssl.version = webhook->ssl.version;
+        if (IS(c->url->protocol, "https")) {
+#ifdef HAVE_OPENSSL
+                c->ssl.use_ssl = true;
+                c->ssl.version = (webhook->ssl.version == SSL_Disabled) ? SSL_Auto : webhook->ssl.version;
+                if (webhook->ssl.certmd5) {
+                        c->ssl.certmd5 = webhook->ssl.certmd5;
+                        cleanup_hash_string(c->ssl.certmd5);
+                }
+#else
+                yyerror("SSL check cannot be activated -- SSL disabled");
+#endif
+        }
+        c->timeout = webhook->timeout;
+        c->next = NULL;
+
+        if (Run.webhooks) {
+                Webhook_T C;
+                for (C = Run.webhooks; C->next; C = C->next)
+                        /* Empty */ ;
+                C->next = c;
+        } else {
+                Run.webhooks = c;
+        }
+        reset_webhookset();
 }
 
 
@@ -4111,6 +4201,18 @@ static void reset_mailserverset() {
 static void reset_mmonitset() {
         memset(&mmonitset, 0, sizeof(struct mymmonit));
         mmonitset.timeout = NET_TIMEOUT;
+        mmonitset.ssl.use_ssl = false;
+        mmonitset.ssl.version = SSL_Disabled;
+}
+
+
+/*
+ * Reset the webhook set to default values
+ */
+static void reset_webhookset() {
+        memset(&webhookset, 0, sizeof(struct mywebhook));
+        webhookset.ssl.use_ssl = false;
+        webhookset.ssl.version = SSL_Disabled;
 }
 
 
@@ -4479,4 +4581,3 @@ static command_t copycommand(command_t source) {
 
         return copy;
 }
-
