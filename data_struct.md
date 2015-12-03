@@ -2,21 +2,21 @@
 
 * `event`
     * `id`: Event type
+    * `state`: Monitored service state
     * `service`: Event source service name
     * `type`: Monitored service type
-    * `state`: Monitored service state
     * `action`: Description of the event action
     * `message`: Message describing the event
 
 ### Event Type
 
-See also: https://github.com/bolasblack/monit/blob/feature/webhook/src/event.h#L31
-
-### Service Type
-
-See also: https://github.com/bolasblack/monit/blob/feature/webhook/src/monit.h#L253
+See also: https://bitbucket.org/tildeslash/monit/src/b8dd906bb6b3129b4153a42924be4f34c5d77727/src/event.h?at=master&fileviewer=file-view-default#event.h-31
 
 ### State Type
+
+See also: https://bitbucket.org/tildeslash/monit/src/b8dd906bb6b3129b4153a42924be4f34c5d77727/src/monit.h?at=master&fileviewer=file-view-default#monit.h-188
+
+Search `Event_post(` in file https://bitbucket.org/tildeslash/monit/src/b8dd906bb6b3129b4153a42924be4f34c5d77727/src/validate.c?at=master&fileviewer=file-view-default , to know what each state mean.
 
 * 0: Successed
     * process start running
@@ -31,15 +31,13 @@ See also: https://github.com/bolasblack/monit/blob/feature/webhook/src/monit.h#L
     * etc ...
 * 3: ChangedNot
 
+### Service Type
+
+See also: https://bitbucket.org/tildeslash/monit/src/b8dd906bb6b3129b4153a42924be4f34c5d77727/src/monit.h?at=master&fileviewer=file-view-default#monit.h-252
+
 ### Action Type
 
-* 1: Alert
-* 2: Restart
-* 3: Stop
-* 4: Exec
-* 5: Unmonitor
-* 6: Start
-* 7: Monitor
+See also: https://bitbucket.org/tildeslash/monit/src/b8dd906bb6b3129b4153a42924be4f34c5d77727/src/monit.h?at=master&fileviewer=file-view-default#monit.h-225
 
 ## Example
 
