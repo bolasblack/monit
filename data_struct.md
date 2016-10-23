@@ -41,6 +41,8 @@ See also: https://bitbucket.org/tildeslash/monit/src/b8dd906bb6b3129b4153a42924b
 
 ## Example
 
+Read https://bitbucket.org/tildeslash/monit/src/f5692a4b5654596c949cea995fe51fefaba25268/src/http/xml.c for more detail
+
 ```xml
 <?xml version="1.0" encoding="ISO-8859-1"?>
 <monit id="961596757191da129caf6ec937c423ef" incarnation="1440342614" version="5.14">
